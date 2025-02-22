@@ -1,97 +1,147 @@
+# Artistaa: AI-Powered WhatsApp Chatbot with Context-Aware Conversations
 
+Artistaa is a NestJS-based WhatsApp chatbot that provides creative and personalized responses using OpenAI's language models. The bot maintains conversation context using Redis and integrates seamlessly with WhatsApp Cloud API to deliver a friendly, engaging user experience with emoji-enhanced responses.
 
-<p align="center"> <a href="http://nestjs.com/" target="blank"><img src="https://github.com/user-attachments/assets/39665bff-a4b3-46ea-9752-2e85b36b7bab" height="300"  alt="Nest Logo" /></a> </p> <p align="center"> A production-ready <a href="http://nodejs.org" target="_blank">Node.js</a> WhatsApp chatbot built with <a href="https://nestjs.com/" target="_blank">NestJS</a>, leveraging the <a href="https://developers.facebook.com/docs/whatsapp/cloud-api" target="_blank">WhatsApp Cloud API</a> for direct integration with WhatsApp, GPT-4o for conversational intelligence and Redis (free tier from Upstash) for context management. </p>
+The application features a robust architecture that handles message processing, context management, and AI response generation. It uses Redis for storing conversation history, ensuring contextually relevant responses while maintaining user privacy through phone number hashing. The system is designed to be reliable with graceful error handling and includes comprehensive logging for monitoring and debugging.
 
+## Repository Structure
+```
+.
+├── src/                          # Source code directory
+│   ├── main.ts                   # Application entry point
+│   ├── openai/                   # OpenAI integration module
+│   │   └── openai.service.ts     # Handles AI response generation
+│   ├── user-context/             # User context management module
+│   │   └── user-context.service.ts # Manages conversation history in Redis
+│   └── whatsapp/                 # WhatsApp integration module
+│       └── whatsapp/
+│           ├── whatsapp.controller.ts # Handles WhatsApp webhook endpoints
+│           └── whatsapp.service.ts    # Manages WhatsApp message operations
+├── test/                         # Test files directory
+└── package.json                  # Project dependencies and scripts
+```
 
-## Step-by-Step Guide
-For a detailed, step-by-step guide on building this chatbot, check out:
+## Usage Instructions
+### Prerequisites
+- Node.js (v14 or higher)
+- Redis server
+- OpenAI API key
+- WhatsApp Cloud API credentials
+- Environment variables:
+  - OPENAI_API_KEY
+  - REDIS_URL
+  - WHATSAPP_CLOUD_API_VERSION
+  - WHATSAPP_CLOUD_API_PHONE_NUMBER_ID
+  - WHATSAPP_CLOUD_API_ACCESS_TOKEN
+  - WHATSAPP_CLOUD_API_WEBHOOK_VERIFICATION_TOKEN
+  - HASHING_SALT
 
-[<img width="960" alt="WhatsApp AI Chatbot" src="https://github.com/user-attachments/assets/ed05d93e-613a-41db-8514-b12d722fe246">](https://youtu.be/Nn9JJ8IdxM8)
-## NestJS WhatsApp Chatbot with GPT-4o
+### Installation
+```bash
+# Clone the repository
+git clone <repository-url>
 
-**Key Features:**
+# Install dependencies
+npm install
 
-* **GPT-4o Integration:** Utilizes the advanced capabilities of GPT-4o for natural language understanding and generation, ensuring engaging and intelligent conversations.
-* **Redis for Context:** Stores conversation context in Redis, enabling the chatbot to maintain a cohesive dialogue and provide context-aware responses.
-* **NestJS Framework:** Built on the robust and scalable NestJS framework, providing a well-structured and maintainable codebase.
-* **Production-Ready:** Designed with production environments in mind, ensuring security, stability, scalability, and reliability.
+# Build the application
+npm run build
+```
 
-**Getting Started:**
+### Quick Start
+1. Set up environment variables:
+```bash
+cp .env.example .env
+# Edit .env with your credentials
+```
 
-1. **Install Node.js:** Download and install the latest version of Node.js from [https://nodejs.org/](https://nodejs.org/).
+2. Start the application:
+```bash
+npm run start
+```
 
-2. **Install Dependencies:**
+3. Configure WhatsApp webhook:
+- Use the `/whatsapp/webhook` endpoint as your webhook URL
+- Set up webhook verification token in your environment variables
 
-   ```bash
-   npm install
-   ```
+### More Detailed Examples
 
-3. **Configure Environment Variables:**
+**Handling WhatsApp Messages**
+```typescript
+// Send a message to WhatsApp user
+await whatsAppService.sendWhatsAppMessage(
+  userPhoneNumber,
+  "Hello! How can I help you today?",
+  messageId
+);
 
-    - Set up environment variables for API keys (OpenAI, WhatsApp API provider), database credentials (Redis), and other necessary configurations.
+// Mark message as read
+await whatsAppService.markMessageAsRead(messageId);
+```
 
-4. **Run the Chatbot:**
+**Managing User Context**
+```typescript
+// Save and fetch conversation context
+const context = await userContextService.saveAndFetchContext(
+  userInput,
+  'user',
+  userId
+);
+```
 
-    - **Development Mode:**
-      ```bash
-      npm run start:dev
-      ```
-      This command starts the chatbot in development mode with file watching for changes.
+### Troubleshooting
 
-    - **Debug Mode:**
-      ```bash
-      npm run start:debug
-      ```
-      This command starts the chatbot in debug mode with file watching for changes, enabling you to use a debugger.
+**Common Issues**
 
-    - **Production Mode:**
-      ```bash
-      npm run start:prod
-      ```
-      This command starts the chatbot in production mode, optimized for performance and stability.
+1. WhatsApp Webhook Verification Fails
+- Error: "Error verifying token"
+- Solution:
+  ```bash
+  # Check webhook verification token
+  echo $WHATSAPP_CLOUD_API_WEBHOOK_VERIFICATION_TOKEN
+  # Ensure it matches the token in WhatsApp Cloud API settings
+  ```
 
-## Connecting Your Backend To WhatsApp:
+2. Redis Connection Issues
+- Error: "Error Saving Context"
+- Steps:
+  1. Verify Redis connection:
+  ```bash
+  redis-cli ping
+  ```
+  2. Check Redis URL in environment variables
+  3. Ensure Redis server is running:
+  ```bash
+  systemctl status redis
+  ```
 
-- **No third-party providers needed!** You can directly integrate with the WhatsApp Cloud API by following these steps:
-   1. Create a Facebook Developer account at [https://developers.facebook.com/](https://developers.facebook.com/).
-   2. Create a WhatsApp Business account and integrate it with your Facebook Developer account.
-   3. Follow the official WhatsApp Cloud API documentation to configure your chatbot. (details to be saved to your environment file)
+3. OpenAI API Issues
+- Error: "Unable to process your request at the moment"
+- Debug steps:
+  1. Check API key validity
+  2. Verify API endpoint configuration
+  3. Enable debug logging:
+  ```typescript
+  this.logger.debug('OpenAI Request:', { input: userInput });
+  ```
 
+## Data Flow
+The application processes messages through a chain of services, from WhatsApp webhook to AI response generation and back.
 
-**Testing (Contributions are welcome - running by grace, no tests):**
+```ascii
+WhatsApp API ─► Controller ─► WhatsApp Service ─► OpenAI Service
+     ▲                                                  │
+     │                                                  │
+     └──────────── User Context Service ◄──────────────┘
+                   (Redis Storage)
+```
 
-* **Unit Tests:**
-
-   ```bash
-   npm run test
-   ```
-
-* **End-to-End (E2E) Tests:**
-
-   ```bash
-   npm run test:e2e
-   ```
-
-**Support and Contribution:**
-
-We welcome contributions and feedback. If you encounter issues or have suggestions, please open an issue on GitHub.
-
-**Acknowledgements:**
-
-This chatbot is made possible by the incredible work of the following projects:
-
-* [NestJS](https://nestjs.com/)
-* [WhatsApp Cloud API](https://developers.facebook.com/docs/whatsapp/cloud-api/)
-* [GPT-4o](https://platform.openai.com/docs/models/gpt-4o)
-* [Upstash Redis](https://upstash.com/)
-* [ioredis](https://github.com/luin/ioredis)
-* [openai](https://github.com/openai/openai-node)
-
-**Join the Conversation:**
-
-More features to be added to the chatbot, stay in the loop:
-
-* [My Youtube Channel](https://www.youtube.com/channel/UChZk6jLmTKn2BINb9o51otQ)
-* [Say Hi On LinkedIn](https://www.linkedin.com/in/tafadzwa-demba/)
-
-**Let's build a smarter and more engaging WhatsApp experience!** 
+Key Component Interactions:
+1. WhatsApp webhook receives incoming messages
+2. Messages are processed by WhatsApp controller
+3. User context is retrieved from Redis
+4. OpenAI service generates responses using context
+5. Responses are stored in context
+6. Messages are sent back to WhatsApp
+7. Message status is updated (read receipts)
+8. All operations are logged for monitoring
