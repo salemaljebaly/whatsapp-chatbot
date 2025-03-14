@@ -1,15 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { OpenAI } from 'openai';
 import { UserContextService } from 'src/user-context/user-context.service';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
 @Injectable()
 export class OpenaiService {
   constructor(private readonly context: UserContextService) {}
 
-  private readonly openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-    baseURL: 'http://localhost:11434/v1'
-  });
+  private readonly genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
   private readonly logger = new Logger(OpenaiService.name);
 
   async generateAIResponse(userID: string, userInput: string) {
@@ -38,6 +35,7 @@ export class OpenaiService {
       
       Remember to keep the interactions human-like, personable, and infused with creativity while maintaining a professional demeanor. Your primary objective is to assist the user effectively while making the conversation enjoyable.`;
 
+      // Get the conversation history
       const userContext = await this.context.saveAndFetchContext(
         userInput,
         'user',
@@ -45,18 +43,39 @@ export class OpenaiService {
       );
       this.logger.log(userContext);
 
-      const response = await this.openai.chat.completions.create({
-        messages: [{ role: 'system', content: systemPrompt }, ...userContext],
-        model: 'deepseek-r1'
+      // Format the conversation history for Gemini
+      // Exclude the most recent message which we'll send separately
+      const formattedHistory = userContext.slice(0, -1).map(msg => ({
+        role: msg.role === 'user' ? 'user' : 'model',
+        parts: [{ text: msg.content }]
+      }));
+
+      // Initialize Gemini model with Flash-Lite
+      const model = this.genAI.getGenerativeModel({
+        model: "gemini-2.0-flash-lite",
+        systemInstruction: systemPrompt,
       });
 
-      const aiResponse = response.choices[0].message.content;
+      // Create a chat session with history but without the current message
+      const chat = model.startChat({
+        history: formattedHistory,
+        generationConfig: {
+          temperature: 0.7,
+          maxOutputTokens: 800,
+        },
+      });
 
+      // Send just the current message
+      const result = await chat.sendMessage(userInput);
+      const aiResponse = result.response.text();
+
+      // Save the AI response to context
       await this.context.saveToContext(aiResponse, 'assistant', userID);
 
       return aiResponse;
     } catch (error) {
       this.logger.error('Error generating AI response', error);
+      this.logger.error('Full error details:', JSON.stringify(error.response?.data || error.message));
       // Fail gracefully!!
       return 'Sorry, I am unable to process your request at the moment.';
     }
