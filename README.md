@@ -38,8 +38,6 @@ GEMINI_API_KEY=your_gemini_api_key
 REDIS_URL=redis://localhost:6379
 HASHING_SALT=your_hashing_salt
 
-# Flight Booking API (if using)
-FLIGHT_API_KEY=your_flight_api_key
 ```
 
 ## Installation
@@ -92,7 +90,7 @@ The application follows a modular architecture using NestJS:
 - **User Context Module**: Manages conversation history using Redis
 - **Flight Booking Module**: Provides flight booking functionalities via API integration
 
-## Flight Booking Flow
+## Flight Booking Flow - this feature must do in next task
 
 1. User initiates flight booking with a command like "Book a flight"
 2. Bot uses function calling to gather necessary details:
