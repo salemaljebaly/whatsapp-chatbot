@@ -1,10 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { UserContextService } from 'src/user-context/user-context.service';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleGenerativeAI, SchemaType, FunctionDeclaration } from '@google/generative-ai';
+import { AmadeusService } from 'src/amadeus/amadeus.service';
 
 @Injectable()
 export class OpenaiService {
-  constructor(private readonly context: UserContextService) {}
+  constructor(
+    private readonly context: UserContextService,
+    private readonly amadeus: AmadeusService,
+  ) {}
 
   private readonly genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
   private readonly logger = new Logger(OpenaiService.name);
@@ -26,14 +30,26 @@ export class OpenaiService {
          - Provide clear and concise answers.
          - Use bullet points or numbered lists for clarity when necessary.
       
-      4. Offering Assistance:
+      4. Travel Assistant:
+         - You have the ability to search for flight offers when users ask about flights or travel.
+         - When users ask about flights, make sure to extract the origin, destination, date and other relevant information.
+         - You can use the searchFlightOffers function to find flights for the user.
+         - Always format flight results in a clear and concise manner.
+      
+      5. Offering Assistance:
          - Always ask if there's anything else the user needs help with.
       
-      5. Closing Messages:
+      6. Closing Messages:
          - End conversations on a positive note.
          - Thank the user for reaching out.
       
       Remember to keep the interactions human-like, personable, and infused with creativity while maintaining a professional demeanor. Your primary objective is to assist the user effectively while making the conversation enjoyable.`;
+
+      // Handle empty user input
+      if (!userInput || userInput.trim() === "") {
+        this.logger.warn("Empty user input received.");
+        return "Please provide some input to get started.";
+      }
 
       // Get the conversation history
       const userContext = await this.context.saveAndFetchContext(
@@ -41,19 +57,64 @@ export class OpenaiService {
         'user',
         userID,
       );
-      this.logger.log(userContext);
+      // this.logger.log(userContext);
 
-      // Format the conversation history for Gemini
-      // Exclude the most recent message which we'll send separately
-      const formattedHistory = userContext.slice(0, -1).map(msg => ({
-        role: msg.role === 'user' ? 'user' : 'model',
-        parts: [{ text: msg.content }]
-      }));
+      // Format the conversation history for Gemini, filtering out empty content
+      const formattedHistory = userContext
+        .filter(msg => msg.content && msg.content.trim() !== "")
+        .slice(0, -1)
+        .map(msg => ({
+          role: msg.role === 'user' ? 'user' : 'model',
+          parts: [{ text: msg.content }]
+        }));
+
+      // Define function for flight search
+      const functionDeclarations: FunctionDeclaration[] = [
+        {
+          name: "searchFlightOffers",
+          description: "Search for flight offers based on origin, destination and dates",
+          parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+              originLocationCode: {
+                type: SchemaType.STRING,
+                description: "Origin location IATA code (e.g., 'SYD' for Sydney)"
+              },
+              destinationLocationCode: {
+                type: SchemaType.STRING,
+                description: "Destination location IATA code (e.g., 'BKK' for Bangkok)"
+              },
+              departureDate: {
+                type: SchemaType.STRING,
+                description: "Departure date in YYYY-MM-DD format"
+              },
+              adults: {
+                type: SchemaType.NUMBER,
+                description: "Number of adult passengers"
+              },
+              max: {
+                type: SchemaType.NUMBER,
+                description: "Maximum number of offers to return (optional)"
+              },
+              returnDate: {
+                type: SchemaType.STRING,
+                description: "Return date in YYYY-MM-DD format (optional for one-way trips)"
+              },
+              travelClass: {
+                type: SchemaType.STRING,
+                description: "Travel class: ECONOMY, PREMIUM_ECONOMY, BUSINESS, or FIRST (optional)"
+              }
+            },
+            required: ["originLocationCode", "destinationLocationCode", "departureDate", "adults"]
+          }
+        }
+      ];
 
       // Initialize Gemini model with Flash-Lite
       const model = this.genAI.getGenerativeModel({
         model: "gemini-2.0-flash-lite",
         systemInstruction: systemPrompt,
+        tools: [{ functionDeclarations }]
       });
 
       // Create a chat session with history but without the current message
@@ -66,8 +127,61 @@ export class OpenaiService {
       });
 
       // Send just the current message
+      this.logger.log(`userInput before sendMessage: ${userInput}`);
       const result = await chat.sendMessage(userInput);
-      const aiResponse = result.response.text();
+      const response = result.response;
+      this.logger.log(`AI Response: ${JSON.stringify(response)}`);
+      let aiResponse = '';
+
+      // Check if we have function calls
+      if (response.functionCalls && response.functionCalls.length > 0) {
+        // Handle function calls
+        const functionCall = response.functionCalls[0];
+        this.logger.log(`Function call detected: ${functionCall.name}`);
+
+        if (functionCall.name === 'searchFlightOffers') {
+          this.logger.log('Entering searchFlightOffers handler');
+          try {
+            const args = JSON.parse(functionCall.args);
+            this.logger.log(`Flight search args: ${JSON.stringify(args)}`);
+
+            this.logger.log('About to call amadeus.searchFlightOffers with args:', JSON.stringify(args));
+            const flightResults = await this.amadeus.searchFlightOffers({
+              originLocationCode: args.originLocationCode,
+              destinationLocationCode: args.destinationLocationCode,
+              departureDate: args.departureDate,
+              adults: args.adults || 1,
+              max: args.max,
+              returnDate: args.returnDate,
+              travelClass: args.travelClass,
+            });
+
+            // **Step 1: Send the function response back to Gemini**
+            const functionResponse = await chat.sendMessage([
+              {
+                text: JSON.stringify({
+                  name: functionCall.name,
+                  content: flightResults, //  Send the flight results back to Gemini!
+                }),
+              },
+            ]);
+            this.logger.log(`Function Response Sent back to Gemini: ${JSON.stringify(functionResponse)}`);
+
+            // **Step 2: Get the AI's response to the function results**
+            aiResponse = functionResponse.response.text(); // The AI will now give you a human-readable response, after seeing the function's result.
+            this.logger.log(`Final AI Response (after function call): ${aiResponse}`);
+
+
+          } catch (error) {
+            this.logger.error('Error during flight search function call', error);
+            aiResponse = "I'm sorry, I encountered an error while searching for flights. Please try again with different search parameters.";
+          }
+        }
+      } else {
+        // No function calls, just get the text response
+        aiResponse = response.text();
+        this.logger.log(`No function call, just text response: ${aiResponse}`);
+      }
 
       // Save the AI response to context
       await this.context.saveToContext(aiResponse, 'assistant', userID);
@@ -76,7 +190,6 @@ export class OpenaiService {
     } catch (error) {
       this.logger.error('Error generating AI response', error);
       this.logger.error('Full error details:', JSON.stringify(error.response?.data || error.message));
-      // Fail gracefully!!
       return 'Sorry, I am unable to process your request at the moment.';
     }
   }
