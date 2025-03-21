@@ -156,21 +156,34 @@ export class OpenaiService {
               travelClass: args.travelClass,
             });
 
+            // Ensure we have a valid response from the function call
+            this.logger.log(`Flight results received: ${JSON.stringify(flightResults)}`);
+
             // **Step 1: Send the function response back to Gemini**
             const functionResponse = await chat.sendMessage([
               {
                 text: JSON.stringify({
                   name: functionCall.name,
-                  content: flightResults, //  Send the flight results back to Gemini!
+                  content: flightResults, // Send the flight results back to Gemini
                 }),
               },
             ]);
-            this.logger.log(`Function Response Sent back to Gemini: ${JSON.stringify(functionResponse)}`);
-
+            
             // **Step 2: Get the AI's response to the function results**
-            aiResponse = functionResponse.response.text(); // The AI will now give you a human-readable response, after seeing the function's result.
-            this.logger.log(`Final AI Response (after function call): ${aiResponse}`);
+            if (functionResponse.response && functionResponse.response.text) {
+              aiResponse = functionResponse.response.text();
+              this.logger.log(`Final AI Response (after function call): ${aiResponse}`);
+            } else {
+              // Fallback response if we don't get a proper response from Gemini
+              this.logger.error('No valid response from Gemini after function call');
+              aiResponse = "I found some flight options for you! Unfortunately, I couldn't format them properly. Please try asking for flight information again with specific details.";
+            }
 
+            // Ensure aiResponse is not empty or undefined
+            if (!aiResponse || aiResponse.trim() === '') {
+              this.logger.error('Empty AI response after function call');
+              aiResponse = "I searched for flights based on your criteria, but I'm having trouble displaying the results. Could you please try again?";
+            }
 
           } catch (error) {
             this.logger.error('Error during flight search function call', error);
@@ -183,6 +196,12 @@ export class OpenaiService {
         this.logger.log(`No function call, just text response: ${aiResponse}`);
       }
 
+      // Final validation to ensure we never return empty content to WhatsApp
+      if (!aiResponse || aiResponse.trim() === '') {
+        this.logger.error('Empty final AI response - using fallback');
+        aiResponse = "I understand your request, but I'm having trouble generating a response right now. Could you please try again?";
+      }
+
       // Save the AI response to context
       await this.context.saveToContext(aiResponse, 'assistant', userID);
 
@@ -190,7 +209,7 @@ export class OpenaiService {
     } catch (error) {
       this.logger.error('Error generating AI response', error);
       this.logger.error('Full error details:', JSON.stringify(error.response?.data || error.message));
-      return 'Sorry, I am unable to process your request at the moment.';
+      return 'Sorry, I am unable to process your request at the moment. Please try again later.';
     }
   }
 }
