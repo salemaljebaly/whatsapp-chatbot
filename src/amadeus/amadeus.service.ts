@@ -80,6 +80,7 @@ export class AmadeusService {
   }) {
     try {
       const token = await this.getAccessToken();
+      console.log('====================================');
       console.log('Token:', token);
       
       const apiUrl = 'https://test.api.amadeus.com/v2/shopping/flight-offers';
@@ -99,7 +100,11 @@ export class AmadeusService {
         ),
       );
       
-      return "the offer search result returned";
+      return {
+        status: 'success',
+        data: response.data || {},
+        message: 'Flight offers retrieved successfully'
+      };
     } catch (error) {
       this.logger.error('Flight search error', error);
       throw error;
