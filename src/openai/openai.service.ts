@@ -44,8 +44,7 @@ export class OpenaiService {
          - Thank the user for reaching out.
       
       Remember to keep the interactions human-like, personable, and infused with creativity while maintaining a professional demeanor. Your primary objective is to assist the user effectively while making the conversation enjoyable.`;
-
-      // Handle empty user input
+      
       if (!userInput || userInput.trim() === "") {
         this.logger.warn("Empty user input received.");
         return "Please provide some input to get started.";
@@ -134,72 +133,82 @@ export class OpenaiService {
       let aiResponse = '';
 
       // Check if we have function calls
-      if (response.functionCalls && response.functionCalls.length > 0) {
-        // Handle function calls
-        const functionCall = response.functionCalls[0];
-        this.logger.log(`Function call detected: ${functionCall.name}`);
+      let functionCall = null;
 
-        if (functionCall.name === 'searchFlightOffers') {
-          this.logger.log('Entering searchFlightOffers handler');
-          try {
-            const args = JSON.parse(functionCall.args);
-            this.logger.log(`Flight search args: ${JSON.stringify(args)}`);
+// Check for function calls in the standard response format
+if (response.functionCalls && response.functionCalls.length > 0) {
+  functionCall = response.functionCalls[0];
+} 
+// Check for function calls in the candidates format (Gemini 2.0)
+else if (response.candidates && response.candidates.length > 0) {
+  const candidate = response.candidates[0];
+  if (candidate.content && candidate.content.parts && candidate.content.parts.length > 0) {
+    const part = candidate.content.parts[0];
+    if (part.functionCall) {
+      functionCall = part.functionCall;
+    }
+  }
+}
 
-            this.logger.log('About to call amadeus.searchFlightOffers with args:', JSON.stringify(args));
-            const flightResults = await this.amadeus.searchFlightOffers({
-              originLocationCode: args.originLocationCode,
-              destinationLocationCode: args.destinationLocationCode,
-              departureDate: args.departureDate,
-              adults: args.adults || 1,
-              max: args.max,
-              returnDate: args.returnDate,
-              travelClass: args.travelClass,
-            });
+// Process the function call if found
+if (functionCall) {
+  this.logger.log(`Function call detected: ${functionCall.name}`);
 
-            // Ensure we have a valid response from the function call
-            this.logger.log(`Flight results received: ${JSON.stringify(flightResults)}`);
+  if (functionCall.name === 'searchFlightOffers') {
+    this.logger.log('Entering searchFlightOffers handler');
+    try {
+      // Handle the args which may be a string or object depending on the response format
+      const args = typeof functionCall.args === 'string' 
+        ? JSON.parse(functionCall.args) 
+        : functionCall.args;
+      
+      this.logger.log(`Flight search args: ${JSON.stringify(args)}`);
 
-            // **Step 1: Send the function response back to Gemini**
-            const functionResponse = await chat.sendMessage([
-              {
-                text: JSON.stringify({
-                  name: functionCall.name,
-                  content: flightResults, // Send the flight results back to Gemini
-                }),
-              },
-            ]);
-            
-            // **Step 2: Get the AI's response to the function results**
-            if (functionResponse.response && functionResponse.response.text) {
-              aiResponse = functionResponse.response.text();
-              this.logger.log(`Final AI Response (after function call): ${aiResponse}`);
-            } else {
-              // Fallback response if we don't get a proper response from Gemini
-              this.logger.error('No valid response from Gemini after function call');
-              aiResponse = "I found some flight options for you! Unfortunately, I couldn't format them properly. Please try asking for flight information again with specific details.";
-            }
-
-            // Ensure aiResponse is not empty or undefined
-            if (!aiResponse || aiResponse.trim() === '') {
-              this.logger.error('Empty AI response after function call');
-              aiResponse = "I searched for flights based on your criteria, but I'm having trouble displaying the results. Could you please try again?";
-            }
-
-          } catch (error) {
-            this.logger.error('Error during flight search function call', error);
-            aiResponse = "I'm sorry, I encountered an error while searching for flights. Please try again with different search parameters.";
-          }
-        }
+      this.logger.log('About to call amadeus.searchFlightOffers with args:', JSON.stringify(args));
+      const flightResults = await this.amadeus.searchFlightOffers({
+        originLocationCode: args.originLocationCode,
+        destinationLocationCode: args.destinationLocationCode,
+        departureDate: args.departureDate,
+        adults: args.adults || 1,
+        max: args.max,
+        returnDate: args.returnDate,
+        travelClass: args.travelClass,
+      });
+      
+      // Send the function response back to Gemini
+      const functionResponse = await chat.sendMessage([
+        {
+          text: JSON.stringify({
+            name: functionCall.name,
+            content: flightResults,
+          }),
+        },
+      ]);
+      this.logger.log(`Function Response Sent back to Gemini: ${JSON.stringify(functionResponse)}`);
+      
+      // Get the AI's response to the function results
+      if (functionResponse.response) {
+        aiResponse = functionResponse.response.text();
+        this.logger.log(`Final AI Response (after function call): ${aiResponse}`);
       } else {
-        // No function calls, just get the text response
-        aiResponse = response.text();
-        this.logger.log(`No function call, just text response: ${aiResponse}`);
+        this.logger.error('No valid response from Gemini after function call');
+        aiResponse = "I'm sorry, but I was unable to get flight information. Please try again";
       }
+    } catch (error) {
+      this.logger.error('Error during flight search function call', error);
+      aiResponse = "I'm sorry, I encountered an error while searching for flights. Please try again with different search parameters.";
+    }
+  }
+} else {
+  // No function calls found in any format, just get the text response
+  aiResponse = response.text();
+  this.logger.log(`No function call found, using text response: ${aiResponse}`);
+}
 
-      // Final validation to ensure we never return empty content to WhatsApp
-      if (!aiResponse || aiResponse.trim() === '') {
-        this.logger.error('Empty final AI response - using fallback');
-        aiResponse = "I understand your request, but I'm having trouble generating a response right now. Could you please try again?";
+      // Ensure we always have a valid response for WhatsApp
+      if (!aiResponse || aiResponse.trim() === "") {
+        this.logger.warn("Empty AI response, setting default message");
+        aiResponse = "I'm processing your request, but I'm having trouble generating a response right now. Could you please try again?";
       }
 
       // Save the AI response to context
